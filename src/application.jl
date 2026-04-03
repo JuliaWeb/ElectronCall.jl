@@ -94,19 +94,18 @@ function Application(;
     development_mode::Bool = false,
     additional_electron_args::Vector{String} = String[],
     main_js::String = default_main_js_path(),
+    verbose::Bool = false,
 )
     @assert isfile(main_js) "Main.js file not found: $main_js"
 
     # Adjust security for development mode
     if development_mode && security === secure_defaults()
         security = development_config()
-        @info "Using development security configuration (some features disabled for debugging)"
+        verbose && @info "Using development security configuration (some features disabled for debugging)"
     end
 
-
-
     # Validate security configuration
-    validate_security_config(security)
+    validate_security_config(security, verbose)
 
     # Get the Electron binary path
     electron_path = get_electron_binary_cmd()
@@ -131,7 +130,7 @@ function Application(;
     # Add sandbox control - default is enabled (opposite of original Electron.jl)
     if !security.sandbox
         push!(electron_cmd_args, "--no-sandbox")
-        @warn "Sandbox disabled - this reduces security. Only disable for development/debugging."
+        verbose && @warn "Sandbox disabled - this reduces security. Only disable for development/debugging."
     end
 
     # Add custom electron arguments (before main.js)
@@ -230,14 +229,14 @@ function default_main_js_path()
     return normpath(joinpath(@__DIR__, "main.js"))
 end
 
-function validate_security_config(config::SecurityConfig)
+function validate_security_config(config::SecurityConfig, verbose::Bool=true)
     # Warn about insecure configurations
     if config.node_integration && config.context_isolation
-        @warn "node_integration=true with context_isolation=true may not work as expected"
+        verbose && @warn "node_integration=true with context_isolation=true may not work as expected"
     end
 
     if !config.context_isolation && !config.sandbox
-        @warn "Disabling both context_isolation and sandbox creates significant security risks"
+        verbose && @warn "Disabling both context_isolation and sandbox creates significant security risks"
     end
 
     # Electron automatically disables sandbox when nodeIntegration is enabled

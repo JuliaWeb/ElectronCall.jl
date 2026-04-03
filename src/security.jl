@@ -73,7 +73,6 @@ should only be used for legacy compatibility during migration.
 function legacy_compatibility_config()
     @warn "Using legacy compatibility configuration with known security vulnerabilities. " *
           "This should only be used temporarily during migration from Electron.jl."
-
     SecurityConfig(
         context_isolation = false,  # ⚠️ INSECURE - matches Electron.jl
         sandbox = false,           # ⚠️ INSECURE - matches Electron.jl --no-sandbox

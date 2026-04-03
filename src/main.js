@@ -80,6 +80,9 @@ function createWindow(connection, opts) {
     // Create the browser window
     const win = new BrowserWindow(opts);
 
+    // Allow many listeners on webContents for rapid load/reload cycles
+    win.webContents.setMaxListeners(100);
+
     // Load URL or default page
     win.loadURL(opts.url || "about:blank");
 
@@ -92,16 +95,20 @@ function createWindow(connection, opts) {
 
     // Set up secure communication based on security config
     if (!security_config || !security_config.context_isolation) {
-        // Legacy mode - inject sendMessageToJulia directly (INSECURE)
+        // Legacy mode - inject sendMessageToJulia directly
         win.webContents.on("did-finish-load", function() {
-            win.webContents.executeJavaScript(`
-                const {ipcRenderer} = require('electron');
-                function sendMessageToJulia(message) {
-                    ipcRenderer.send('msg-for-julia-process', message);
-                };
-                global['sendMessageToJulia'] = sendMessageToJulia;
-                undefined
-            `);
+            if (!win.isDestroyed()) {
+                win.webContents.executeJavaScript(`
+                    try {
+                        const {ipcRenderer} = require('electron');
+                        function sendMessageToJulia(message) {
+                            ipcRenderer.send('msg-for-julia-process', message);
+                        };
+                        global['sendMessageToJulia'] = sendMessageToJulia;
+                    } catch(e) {}
+                    undefined
+                `).catch(() => {});
+            }
         });
     } else {
         // Secure mode - communication via preload script
@@ -181,16 +188,24 @@ function process_command(connection, cmd) {
                 return;
             }
 
-            win.loadURL(cmd.url);
+            // Track whether this load has been responded to
+            let responded = false;
+            function respond(data) {
+                if (!responded) {
+                    responded = true;
+                    connection.write(JSON.stringify(data) + '\n');
+                }
+            }
+
             win.webContents.once("did-finish-load", function() {
-                connection.write(JSON.stringify({}) + '\n');
+                respond({});
             });
 
             win.webContents.once("did-fail-load", function(event, errorCode, errorDescription) {
-                connection.write(JSON.stringify({
-                    error: `Failed to load: ${errorDescription}`
-                }) + '\n');
+                respond({error: `Failed to load: ${errorDescription}`});
             });
+
+            win.loadURL(cmd.url);
 
         } else if (cmd.cmd == 'closewindow') {
             const win = BrowserWindow.fromId(cmd.winid);
