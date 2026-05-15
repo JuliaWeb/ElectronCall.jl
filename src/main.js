@@ -138,15 +138,33 @@ function createWindow(connection, opts) {
 function process_command(connection, cmd) {
     try {
         if (cmd.cmd == 'runcode' && cmd.target == 'app') {
-            // Execute JavaScript in main process
-            let retval;
+            // Execute JavaScript in main process. Await Promise results so
+            // callers can `run(app, "(async () => ...)()")` and synchronously
+            // receive the resolved value — same semantics as the `window`
+            // target below, which goes through executeJavaScript(code, true)
+            // and already awaits.
+            let result;
             try {
-                const result = eval(cmd.code);
-                retval = {data: result === undefined ? null : result};
+                result = eval(cmd.code);
             } catch (error) {
-                retval = {error: error.toString()};
+                connection.write(JSON.stringify({error: error.toString()}) + '\n');
+                return;
             }
-            connection.write(JSON.stringify(retval) + '\n');
+            if (result && typeof result.then === 'function') {
+                result.then(function(value) {
+                    connection.write(JSON.stringify({
+                        data: value === undefined ? null : value
+                    }) + '\n');
+                }).catch(function(error) {
+                    connection.write(JSON.stringify({
+                        error: error && error.message ? error.message : String(error)
+                    }) + '\n');
+                });
+            } else {
+                connection.write(JSON.stringify({
+                    data: result === undefined ? null : result
+                }) + '\n');
+            }
 
         } else if (cmd.cmd == 'runcode' && cmd.target == 'window') {
             // Execute JavaScript in renderer process
