@@ -150,21 +150,18 @@ function process_command(connection, cmd) {
                 connection.write(JSON.stringify({error: error.toString()}) + '\n');
                 return;
             }
-            if (result && typeof result.then === 'function') {
-                result.then(function(value) {
-                    connection.write(JSON.stringify({
-                        data: value === undefined ? null : value
-                    }) + '\n');
-                }).catch(function(error) {
-                    connection.write(JSON.stringify({
-                        error: error && error.message ? error.message : String(error)
-                    }) + '\n');
-                });
-            } else {
+            // Promise.resolve() leaves a promise untouched and wraps a plain
+            // value in an already-resolved one, so both async and sync results
+            // share a single write path.
+            Promise.resolve(result).then(function(value) {
                 connection.write(JSON.stringify({
-                    data: result === undefined ? null : result
+                    data: value === undefined ? null : value
                 }) + '\n');
-            }
+            }).catch(function(error) {
+                connection.write(JSON.stringify({
+                    error: error && error.message ? error.message : String(error)
+                }) + '\n');
+            });
 
         } else if (cmd.cmd == 'runcode' && cmd.target == 'window') {
             // Execute JavaScript in renderer process
