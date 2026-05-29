@@ -105,7 +105,7 @@ function createWindow(connection, opts) {
                             ipcRenderer.send('msg-for-julia-process', message);
                         };
                         global['sendMessageToJulia'] = sendMessageToJulia;
-                    } catch(e) {}
+                    } catch(e) { console.warn('ElectronCall: Failed to set up sendMessageToJulia', e); }
                     undefined
                 `).catch(() => {});
             }
