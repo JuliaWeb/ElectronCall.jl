@@ -64,8 +64,16 @@ end
         result = run(app, "2 + 3")
         @test result == 5
 
+        @info "Testing async/promise execution..."
+        result = run(app, "(async () => 42)()")
+        @test result == 42
+
+        result = run(app, "Promise.resolve('hello')")
+        @test result == "hello"
+
         @info "Testing error handling..."
         @test_throws JSExecutionError run(app, "invalidFunction()")
+        @test_throws JSExecutionError run(app, "(async () => { throw new Error('async boom') })()")
 
         @info "Closing application..."
         close(app)

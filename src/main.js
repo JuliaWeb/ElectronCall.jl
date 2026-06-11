@@ -138,15 +138,24 @@ function createWindow(connection, opts) {
 function process_command(connection, cmd) {
     try {
         if (cmd.cmd == 'runcode' && cmd.target == 'app') {
-            // Execute JavaScript in main process
-            let retval;
+            // Execute JavaScript in main process.
+            let result;
             try {
-                const result = eval(cmd.code);
-                retval = {data: result === undefined ? null : result};
+                result = eval(cmd.code);
             } catch (error) {
-                retval = {error: error.toString()};
+                connection.write(JSON.stringify({error: error.toString()}) + '\n');
+                return;
             }
-            connection.write(JSON.stringify(retval) + '\n');
+            // Await any returned Promise; wraps sync values automatically.
+            Promise.resolve(result).then(function(value) {
+                connection.write(JSON.stringify({
+                    data: value === undefined ? null : value
+                }) + '\n');
+            }).catch(function(error) {
+                connection.write(JSON.stringify({
+                    error: error ? error.toString() : String(error)
+                }) + '\n');
+            });
 
         } else if (cmd.cmd == 'runcode' && cmd.target == 'window') {
             // Execute JavaScript in renderer process
