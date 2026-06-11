@@ -138,11 +138,7 @@ function createWindow(connection, opts) {
 function process_command(connection, cmd) {
     try {
         if (cmd.cmd == 'runcode' && cmd.target == 'app') {
-            // Execute JavaScript in main process. Await Promise results so
-            // callers can `run(app, "(async () => ...)()")` and synchronously
-            // receive the resolved value — same semantics as the `window`
-            // target below, which goes through executeJavaScript(code, true)
-            // and already awaits.
+            // Execute JavaScript in main process.
             let result;
             try {
                 result = eval(cmd.code);
@@ -150,16 +146,14 @@ function process_command(connection, cmd) {
                 connection.write(JSON.stringify({error: error.toString()}) + '\n');
                 return;
             }
-            // Promise.resolve() leaves a promise untouched and wraps a plain
-            // value in an already-resolved one, so both async and sync results
-            // share a single write path.
+            // Await any returned Promise; wraps sync values automatically.
             Promise.resolve(result).then(function(value) {
                 connection.write(JSON.stringify({
                     data: value === undefined ? null : value
                 }) + '\n');
             }).catch(function(error) {
                 connection.write(JSON.stringify({
-                    error: error && error.message ? error.message : String(error)
+                    error: error ? error.toString() : String(error)
                 }) + '\n');
             });
 
