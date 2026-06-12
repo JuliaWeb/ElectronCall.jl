@@ -225,8 +225,19 @@ function generate_pipe_name(name::String)
     end
 end
 
+# Directory holding the JS assets (main.js, preload.js), resolved at RUNTIME.
+# We must not use @__DIR__: it bakes the precompile-time source path into the
+# compiled image, so in a relocatable app bundle (precompiled in a build dir,
+# run from /opt, a snap mount, /tmp, …) it points at a path that no longer
+# exists. pkgdir() is relocation-aware and returns the actual load location.
+function asset_dir()
+    dir = pkgdir(@__MODULE__)
+    dir === nothing && error("ElectronCall: cannot locate package directory to resolve JS assets")
+    return joinpath(dir, "src")
+end
+
 function default_main_js_path()
-    return normpath(joinpath(@__DIR__, "main.js"))
+    return normpath(joinpath(asset_dir(), "main.js"))
 end
 
 function validate_security_config(config::SecurityConfig, verbose::Bool=true)

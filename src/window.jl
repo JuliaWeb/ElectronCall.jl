@@ -217,7 +217,7 @@ function apply_security_defaults!(options::Dict, security_config::SecurityConfig
 
     # Set preload script if specified
     if security_config.preload_script !== nothing && !haskey(web_prefs, "preload")
-        preload_path = normpath(joinpath(@__DIR__, security_config.preload_script))
+        preload_path = normpath(joinpath(asset_dir(), security_config.preload_script))
         if isfile(preload_path)
             web_prefs["preload"] = preload_path
         else
