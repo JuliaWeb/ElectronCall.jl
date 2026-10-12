@@ -745,6 +745,30 @@ end
         end
     end
 
+    @testset "Testing.wheel reads like a real wheel" begin
+        # A real wheel down has deltaY > 0 and the legacy wheelDeltaY < 0.
+        # A scripted WheelEvent that leaves wheelDeltaY out gets deltaY's sign
+        # there, so code that prefers the legacy field (Monaco does) took every
+        # scripted "down" for an "up".
+        T = ElectronCall.Testing
+        html = """<div id="box" style="height:100px;overflow:auto">
+                  <div style="height:1000px"></div></div>
+                  <script>window.seen = [];
+                  document.getElementById('box').addEventListener('wheel',
+                      e => seen.push([e.deltaY, e.wheelDeltaY]));</script>"""
+        ctx = T.open_window(html)
+        try
+            T.install_cursor(ctx)
+            T.move_to(ctx, (50, 50); duration = 0.01)
+            T.wheel(ctx, 120; steps = 1)
+            T.wheel(ctx, -60; steps = 1)
+            @test T.eval_js(ctx, "seen") == [[120, -120], [-60, 60]]
+            @test T.eval_js(ctx, "Math.round(document.getElementById('box').scrollTop)") == 60
+        finally
+            close(ctx)
+        end
+    end
+
     @testset "Additional Error Coverage" begin
         # Test CommunicationError display
         comm_err = CommunicationError("Connection failed", nothing)

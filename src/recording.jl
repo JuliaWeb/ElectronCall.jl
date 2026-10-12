@@ -275,8 +275,12 @@ function wheel(ctx::TestContext, dy::Real; steps::Int = 6, step_sleep::Real = 0.
             (() => {
                 const x = $(Float64(x)), y = $(Float64(y)), dy = $(Float64(per));
                 const el = document.elementFromPoint(x, y) || document.body;
+                // Legacy wheelDeltaY is signed the other way. Left out, Chromium
+                // copies deltaY's sign, and Monaco (which reads it first) takes
+                // down for up.
                 const ev = new WheelEvent('wheel', {clientX: x, clientY: y,
-                    deltaY: dy, deltaMode: 0, bubbles: true, cancelable: true});
+                    deltaY: dy, wheelDeltaY: -dy, deltaMode: 0,
+                    bubbles: true, cancelable: true});
                 const proceed = el.dispatchEvent(ev);
                 if (!proceed) return false;               // a handler prevented default
                 // Default action: scroll the nearest scrollable ancestor.
