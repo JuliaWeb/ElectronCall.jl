@@ -117,10 +117,27 @@ end
 # exists to drive headless UI tests, faithful rAF timing is the correct default;
 # pass `offscreen = false` to opt a window back onto the plain hidden-window path.
 function _test_web_prefs(offscreen::Bool)
+    # `disableDialogs`: an `alert`/`confirm` nobody stubbed would show a native,
+    # focused dialog and wait for a click; `confirm` returns false instead.
     wp = Dict{String,Any}("backgroundThrottling" => false,
-                          "paintWhenInitiallyHidden" => true)
+                          "paintWhenInitiallyHidden" => true,
+                          "disableDialogs" => true)
     offscreen && (wp["offscreen"] = true)
     return wp
+end
+
+# Nothing the page does may put a window on the screen. A link to a new tab or
+# `window.open` gets a BrowserWindow, which Electron shows and focuses unless
+# told otherwise; a download asks where to save it in a dialog.
+function keep_headless!(app::Application, win::Window)
+    run(app, """(() => {
+        const wc = electron.BrowserWindow.fromId($(win.id)).webContents;
+        wc.setWindowOpenHandler(() => ({action: 'allow',
+            overrideBrowserWindowOptions: {show: false, webPreferences: {offscreen: true}}}));
+        wc.session.on('will-download', (e, item) =>
+            item.setSavePath(electron.app.getPath('temp') + '/' + item.getFilename()));
+        return true; })()""")
+    return win
 end
 
 function open_window(url::AbstractString;
@@ -151,6 +168,7 @@ function open_window(url::AbstractString;
     win = Window(app, url;
                  show = show, width = width, height = height,
                  webPreferences = _test_web_prefs(offscreen))
+    keep_headless!(app, win)
     return TestContext(app, win, false)
 end
 
@@ -174,6 +192,7 @@ function open_window(; show::Bool = false,
     win = Window(app;
                  show = show, width = width, height = height,
                  webPreferences = _test_web_prefs(offscreen))
+    keep_headless!(app, win)
     return TestContext(app, win, false)
 end
 

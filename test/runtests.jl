@@ -769,6 +769,22 @@ end
         end
     end
 
+    @testset "Testing windows put nothing on the screen" begin
+        # A new tab or `window.open` got a shown, focused window; `confirm`
+        # a native dialog waiting for a click.
+        T = ElectronCall.Testing
+        ctx = T.open_window("<a id='l' href='about:blank' target='_blank'>new tab</a>")
+        try
+            T.eval_js(ctx, "document.getElementById('l').click(); window.open('about:blank'); true")
+            windows() = run(ctx.app, "electron.BrowserWindow.getAllWindows().length")
+            @test timedwait(() -> windows() == 3, 10.0) === :ok
+            @test run(ctx.app, "electron.BrowserWindow.getAllWindows().every(w => !w.isVisible())") == true
+            @test T.eval_js(ctx, "confirm('no dialog')") == false
+        finally
+            close(ctx)
+        end
+    end
+
     @testset "Additional Error Coverage" begin
         # Test CommunicationError display
         comm_err = CommunicationError("Connection failed", nothing)
