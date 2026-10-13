@@ -86,4 +86,6 @@ function default_application(security::SecurityConfig = secure_defaults())
     return _global_default_application[]
 end
 
+include("testing.jl")
+
 end # module ElectronCall

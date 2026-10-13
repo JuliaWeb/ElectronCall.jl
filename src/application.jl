@@ -4,6 +4,79 @@
 
 const OptDict = Dict{String,Any}
 
+# How long to wait for a freshly spawned Electron to dial back before declaring
+# it dead. Startup is ~1s warm; anything past this is a failure, not slowness.
+const STARTUP_TIMEOUT_SECONDS = 30.0
+
+"""
+    accept_or_fail(server, proc, what) -> socket
+
+`accept` the control connection from a just-spawned Electron, but never block
+forever on it.
+
+A bare `accept` waits indefinitely, so ANY failure that kills Electron during
+startup — no reachable X server, a bad `DISPLAY`/`XAUTHORITY`, a Wayland/ozone
+mismatch, a broken sandbox, a missing binary — turns into a silent hang rather
+than an error. The process has usually already printed the real reason to
+stderr by then, but nothing surfaces it, so the caller just stops. This is the
+single most common way an Electron-driven test or eval "hangs".
+
+Both exits are bounded. Note that the timeout, not the process check, is
+usually what fires: Electron's launcher process often stays alive after the
+renderer aborts, so `process_running` keeps returning true. The process check
+still helps for a clean early exit (missing binary, bad args).
+"""
+function accept_or_fail(server, proc, what::AbstractString;
+                        timeout::Real = STARTUP_TIMEOUT_SECONDS)
+    task = @async accept(server)
+    t0 = time()
+    while !istaskdone(task)
+        if !process_running(proc)
+            close(server)
+            error("Electron exited during startup, before the '$what' connection " *
+                  "(exit code $(proc.exitcode)). Its own error output is above. " *
+                  display_env_hint())
+        end
+        if time() - t0 > timeout
+            close(server)
+            error("Electron did not connect within $(timeout)s (waiting for the " *
+                  "'$what' connection). It is running but never dialed back; its " *
+                  "error output is above. " * display_env_hint())
+        end
+        sleep(0.05)
+    end
+    return fetch(task)
+end
+
+"""
+    display_env_hint() -> String
+
+A human-readable diagnosis of the local display environment, appended to
+startup-failure errors on Linux. Empty on macOS/Windows, which need no X server.
+
+The environment inherited from the desktop session is normally correct all the
+way down (session → worker → agent → MCP → eval worker), so the interesting
+case is an OVERRIDE: something set `XAUTHORITY` explicitly to a path that no
+longer exists. The cookie file is `/run/user/<uid>/xauth_XXXXXX` and its random
+suffix changes when the session restarts, so a hardcoded value goes stale
+silently. Reporting whether the file exists distinguishes the two instantly.
+"""
+function display_env_hint()
+    Sys.islinux() || return ""
+    disp = get(ENV, "DISPLAY", "")
+    xauth = get(ENV, "XAUTHORITY", "")
+    parts = String["DISPLAY=$(isempty(disp) ? "(unset)" : disp)"]
+    if isempty(xauth)
+        push!(parts, "XAUTHORITY=(unset — inheriting, which is normally correct)")
+    elseif isfile(xauth)
+        push!(parts, "XAUTHORITY=$xauth (exists)")
+    else
+        push!(parts, "XAUTHORITY=$xauth (MISSING — someone set this explicitly to a " *
+                     "path that no longer exists; unset it and inherit instead)")
+    end
+    return join(parts, ", ")
+end
+
 """
     get_electron_binary_cmd() -> String
 
@@ -157,9 +230,9 @@ function Application(;
     try
         proc = open(Cmd(electron_cmd, env = new_env), "w", stdout)
 
-        # Accept connections with timeout
-        sock = accept(server)
-        sysnotify_sock = accept(sysnotify_server)
+        # Accept the two control connections, bounded and process-aware.
+        sock = accept_or_fail(server, proc, "main")
+        sysnotify_sock = accept_or_fail(sysnotify_server, proc, "sysnotify")
 
         # Authenticate connections
         if read!(sock, zero(secure_cookie)) != secure_cookie
@@ -207,6 +280,11 @@ function Base.close(app::Application)
 
     app.exists = false
     close(app.connection)
+
+    # Closing the IPC pipe is the graceful exit request. But a wedged headless
+    # Electron (CI/xvfb, no dbus) may ignore it and keep running, orphaning its
+    # process + libuv handle so Julia itself can't exit. Make sure it's gone.
+    app.proc isa Base.Process && process_running(app.proc) && kill(app.proc)
 
     # Remove from global applications list
     app_index = findfirst(a -> a === app, _global_applications)

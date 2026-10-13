@@ -115,9 +115,32 @@ function createWindow(connection, opts) {
         // The preload script handles the secure bridge
     }
 
+    // `connection` is a STRICT request/response stream: Julia writes one command
+    // and reads exactly one line back (req_response_js, under comm_lock). So the
+    // window-creation command must be answered exactly once, by whichever load
+    // event lands first — and nothing else may ever write here unprompted.
+    //
+    // `did-fail-load` used to be a plain `.on` that wrote to `connection` every
+    // time it fired, and it fires for perfectly ordinary aborted loads
+    // (ERR_ABORTED when an iframe's src is swapped, a video is replaced, a
+    // navigation is cancelled) for the whole life of the window. Each one put an
+    // unsolicited line into the stream, where it was read as the reply to
+    // whatever command happened to be in flight: that line has no "status" key,
+    // so the caller died with "Invalid response format from Electron" — and from
+    // that moment the stream was off by one, every later request quietly
+    // receiving the PREVIOUS request's answer. Symptom seen from Julia: an
+    // assertion comparing against a value that belongs to a different query.
+    let creation_replied = false;
+    const reply_once = (payload) => {
+        if (creation_replied) return false;
+        creation_replied = true;
+        connection.write(JSON.stringify(payload) + '\n');
+        return true;
+    };
+
     // Handle window lifecycle
     win.webContents.once("did-finish-load", function() {
-        connection.write(JSON.stringify({data: win_id}) + '\n');
+        reply_once({data: win_id});
 
         win.on('closed', function() {
             safe_sysnotify_write({
@@ -127,11 +150,13 @@ function createWindow(connection, opts) {
         });
     });
 
-    // Handle load errors
+    // Handle load errors: the FIRST one answers the pending creation command,
+    // every later one is a notification, not a reply.
     win.webContents.on('did-fail-load', function(event, errorCode, errorDescription, validatedURL) {
-        connection.write(JSON.stringify({
-            error: `Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`
-        }) + '\n');
+        const message = `Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`;
+        if (!reply_once({error: message})) {
+            safe_sysnotify_write({cmd: "loadfailed", winid: win_id, error: message});
+        }
     });
 }
 
